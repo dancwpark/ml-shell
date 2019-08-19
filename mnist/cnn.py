@@ -53,7 +53,8 @@ model.add(Dropout(0.5))
 model.add(Dense(nb_classes, activation='softmax'))
 
 model.compile(loss=keras.losses.categorical_crossentropy,
-        optimizer=keras.optimizers.Adadelta(),
+        #optimizer=keras.optimizers.Adadelta(),
+        optimizer='adam',
         metrics=['accuracy'])
 
 model.fit(x_train, y_train,
