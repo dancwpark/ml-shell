@@ -12,7 +12,10 @@ import os
 BATCH_SIZE=1
 
 with tf.Session() as sess:
-    data, model = MNIST(), MNISTModel("models/mnist", sess)
+    restore_path = "model/mnist"
+    data, model = MNIST(), MNISTModel(sess).get()
+    
+    
 
     x = tf.placeholder(tf.float32,
             (None, model.image_size, model.image_size, model.num_channels))
