@@ -1,2 +1,2 @@
-# tf-shell
-Shell for TensorFlow Experiments
+# ml shell
+Shell for Machine Learning Experiments
