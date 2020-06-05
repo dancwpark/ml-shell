@@ -13,6 +13,7 @@ import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 lr = 0.1
+device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
 
 def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc=1.0):
     if data_aug:
@@ -92,14 +93,14 @@ class MNISTModel(nn.Module):
         return y_pred
 
 # Initialize the network
-model = MNISTModel()
+model = MNISTModel().to(device)
 # Also can be done without class()
 ## model = nn.Sequential(nn.Linear(784, 128),
 ##                       nn.ReLU(),
 ##                       ...)
 
 # Loss function
-criterion = nn.CrosseEntropy()
+criterion = nn.CrosseEntropy().to(device)
 
 # Get data
 data_aug = False
@@ -125,6 +126,8 @@ for itr in range(nepochs, batches_per_epoch):
 
     optimizer.zero_grad()
     x, y = data_gen.__next__()
+    x = x.to(device)
+    y = y.to(device)
     # Get logits
     logits = model(x)
     # Get loss
