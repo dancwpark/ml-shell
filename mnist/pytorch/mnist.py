@@ -1,7 +1,3 @@
-"""
-This example is without using a gpu.
-TODO: Make another version for gpu (use .to(device), etc...)
-"""
 
 import numpy as np
 import torch
