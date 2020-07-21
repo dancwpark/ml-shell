@@ -1,4 +1,5 @@
-
+import os
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,8 +9,53 @@ from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
-lr = 0.1
+parser = argparse.ArgumentParser()
+parser.add_argument('--nepochs', type=int, default=75)
+parser.add_argument('--lr', type=float, default=0.1)
+parser.add_argument('--batch_size', type=int, default=256)
+parser.add_argument('--test_batch_size', type=int, default=1000)
+parser.add_argument('--gpu', type=int, default=0)
+parser.add_argument('--save', type=str, default='./models/baseline')
+parser.add_argument('--adv_train', type=eval, default=True, choices=[True, False])
+args = parser.parse_args()
+
+lr = args.lr
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
+
+def pgd_attack(model, x, y,
+               eps=0.3,
+               a=0.01,
+               num_steps=40,
+               random_start=True,
+               pixel_range=(0, 1)):
+    """
+    model : model to attack
+    x : input tensor to the model
+    y : true tensor label of input x
+    a : alpha; step size
+    num_steps : number of steps per attack
+    random_start : initializing perturbations with uniform random (true, false)
+    pixel_range : range to clip output pixel
+    """
+    # remove 10 for full
+    example = x[:10].clone().detach().to(device)
+    if eps == 0:
+        return example
+    if random_start:
+        example += torch.rand(*example.shape).to(device)*2*eps - eps
+    # PGD attack
+    for i in range(num_steps):
+        example = example.clone().to(device).detach().requires_grad_(True)
+        pred = model(example)
+        loss = nn.CrossEntropyLoss()(pred, y[:10].to(device))
+        loss.backward()
+    
+        perturbation = example.grad.sign()*a
+        example = example.clone().detach().to(device) + perturbation
+        example = torch.max(torch.min(example, x[:10].to(device)+eps), x[:10].to(device)-eps)
+        example = torch.clamp(example, *pixel_range)
+
+    return example.clone().to(device).detach(), y[:10]
 
 def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc=1.0):
     if data_aug:
@@ -54,14 +100,8 @@ def inf_generator(iterable):
         except StopIteration:
             iterator = iterable.__iter__()
 
-def learning_rate_with_decay(batch_size, batch_denom, 
-                             batches_per_epoch, boundary_epochs, 
-                             decay_rates):
-    initial_learning_rate = lr * batch_size / batch_denom
-
-    boundaries = [int(batches_per_epoch * epoch) for epoch in boundary_epochs]
-    vals = [initial_learning_rate * decay for decay in decay_rates]
-
+def one_hot(x, K):
+    return np.array(x[:, None] == np.arange(K)[None, :], dtype=int)
 
 def accuracy(model, dataset_loader):
     total_correct = 0
@@ -78,51 +118,61 @@ class MNISTModel(nn.Module):
     def __init__(self):
         super(MNISTModel, self).__init__()
 
-        self.hidden_1 = nn.Linear(784, 128)
-        self.hidden_2 = nn.Linear(128, 64)
-        self.output = nn.Linear(64,10)
-    
+        self.conv1 = nn.Conv2d(1, 32, 3, 1)
+        self.conv2 = nn.Conv2d(32, 64, 3, 1)
+        self.dropout1 = nn.Dropout2d(0.25)
+        self.dropout2 = nn.Dropout2d(0.5)
+        self.fc1 = nn.Linear(9216, 128)
+        self.fc2 = nn.Linear(128, 10)
+
     def forward(self, x):
-        x = F.relu(self.hidden_1(x))
-        x = F.relu(self.hidden_2(x))
-        y_pred = self.output(x)
-        return y_pred
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout1(x)
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.dropout2(x)
+        x = self.fc2(x)
+        return x
 
 # Initialize the network
 model = MNISTModel().to(device)
-# Also can be done without class()
-## model = nn.Sequential(nn.Linear(784, 128),
-##                       nn.ReLU(),
-##                       ...)
 
 # Loss function
-criterion = nn.CrosseEntropy().to(device)
+criterion = nn.CrossEntropyLoss().to(device)
 
 # Get data
 data_aug = False
-batch_size = 128
-test_batch_size = 1000
+batch_size = args.batch_size
+test_batch_size = args.test_batch_size
 
+# Data loaders
 train_loader, test_loader, train_eval_loader = get_mnist_loaders(data_aug, batch_size, test_batch_size)
-
-# Learning rate decay (optional)
-lr_fn = learning_rate_with_decay(
-    args.batch_size, batch_denom=128, batches_per_epoch=batches_per_epoch, boundary_epochs=[60, 100, 140],
-    decay_rates=[1, 0.1, 0.01, 0.001])
+data_gen = inf_generator(train_loader)
 
 # Optimizer
-optimizer = optim.Adam(model.parameters(), lr=lr)
+optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
 # Training iteration
-nepochs = 40
-batches_per_epoch = 1000 # usually just put to size of training set
-for itr in range(nepochs, batches_per_epoch):
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr_fn(itr)
+nepochs = args.nepochs
+#batches_per_epoch = len(train_loader) # usually just put to size of training set
+batches_per_epoch = 1000
 
+for itr in range(nepochs * batches_per_epoch):
     optimizer.zero_grad()
     x, y = data_gen.__next__()
-    x = x.to(device)
+    # Have to clone and detach perhaps?
+    if args.adv_train == True:
+        pgd, pgd_l = pgd_attack(model, x, y)
+        x = torch.cat([x.clone().detach().to(device), pgd.to(device)], 0)
+        y = torch.cat([y.to(device), pgd_l.to(device)], 0)
+        x = x.to(device).requires_grad_(True)
+    else:
+        x = x.to(device)
     y = y.to(device)
     # Get logits
     logits = model(x)
@@ -139,6 +189,7 @@ for itr in range(nepochs, batches_per_epoch):
     if itr%batches_per_epoch == 0:
         with torch.no_grad():
             train_acc = accuracy(model, train_eval_loader)
-            val_acc = accuracy(model, test_laoder)
+            val_acc = accuracy(model, test_loader)
             print("Epoch {:04d} | Train Acc {:.4f} | Test Acc {:.4f}".format(itr//batches_per_epoch, train_acc, val_acc))
 
+torch.save({'state_dict':model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
