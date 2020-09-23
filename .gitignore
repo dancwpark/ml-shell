@@ -112,3 +112,6 @@ venv.bak/
 
 # images from scripts
 gan/images/*
+
+# Mac stuff
+**/.DS_Store
