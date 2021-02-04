@@ -25,9 +25,8 @@ with tf.Session() as sess:
             verbose=1,
             validation_data=(data.validation_data, data.validation_labels))
 
-    model.save("model/mnist")
+    model.save("models/mnist")
     score = model.evaluate(data.test_data, data.test_labels, verbose=0)
     print("Test loss:", score[0])
     print("Test accuracy:", score[1])
 
-    s = model.predict()
