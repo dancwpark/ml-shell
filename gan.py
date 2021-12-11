@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from tqdm import tqdm
+import matplotlib
+import matplotlib.pyplot as plt
+
 
 device = "cuda:0"
 device = "cpu"
@@ -71,10 +74,10 @@ class Discriminator(nn.Module):
         return self.model(inp)
 
 def main():
-    g = Generator().to(device)
-    d = Discriminator().to(device)
+    g = torch.nn.DataParallel(Generator().to(device))
+    d = torch.nn.DataParallel(Discriminator().to(device))
     
-    criterion = nn.BCELoss()
+    criterion = nn.BCELoss().to(device)
     fixed_noise = torch.randn(28, nz, 1, 1, device=device)
     real_label = 1.
     fake_label = 0.
@@ -91,13 +94,13 @@ def main():
     iters = 0
     for epoch in tqdm(range(n_epochs)):
         for i, (x, y) in enumerate(mnist.train_loader, 0):
-            d.zero_grad()
+            doptim.zero_grad()
             x = x.to(device)
             label = torch.full((x.size(0), ), 
                             real_label, 
                             dtype=torch.float, 
                             device=device)
-            output = d(x).view(-1)
+            output = d(x).view(-1).to(device)
             errD_real = criterion(output, label)
             errD_real.backward()
             dx = output.mean().item()
@@ -105,20 +108,24 @@ def main():
             noise = torch.randn(x.size(0), nz, 1, 1, device=device)
             fake = g(noise)
             label.fill_(fake_label)
-            output = d(fake.detach()).view(-1)
+            output = d(fake.detach()).view(-1).to(device)
             errD_fake = criterion(output, label)
             errD_fake.backward()
             DGz1 = output.mean().item()
             errD = errD_real + errD_fake
             doptim.step()
 
-            g.zero_grad()
+            goptim.zero_grad()
             label.fill_(real_label)
-            output = d(fake).view(-1)
+            output = d(fake).view(-1).to(device)
             errG = criterion(output, label)
             errG.backward()
             D_G_z2 = output.mean().item()
             goptim.step()
+        fake_pixels = fake.detach().cpu().numpy()[0].reshape((28, 28))
+        plt.imshow(fake_pixels, cmap='gray')
+        plt.show()
+ 
     
 if __name__ == '__main__':
     main()

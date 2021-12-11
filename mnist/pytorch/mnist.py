@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+from time import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--nepochs', type=int, default=75)
@@ -139,57 +140,65 @@ class MNISTModel(nn.Module):
         x = self.fc2(x)
         return x
 
-# Initialize the network
-model = MNISTModel().to(device)
+def main():
+    start = time()
+    # Initialize the network
+    model = MNISTModel().to(device)
 
-# Loss function
-criterion = nn.CrossEntropyLoss().to(device)
+    # Loss function
+    criterion = nn.CrossEntropyLoss().to(device)
 
-# Get data
-data_aug = False
-batch_size = args.batch_size
-test_batch_size = args.test_batch_size
+    # Get data
+    data_aug = False
+    batch_size = args.batch_size
+    test_batch_size = args.test_batch_size
 
-# Data loaders
-train_loader, test_loader, train_eval_loader = get_mnist_loaders(data_aug, batch_size, test_batch_size)
-data_gen = inf_generator(train_loader)
+    # Data loaders
+    train_loader, test_loader, train_eval_loader = get_mnist_loaders(data_aug, batch_size, test_batch_size)
+    data_gen = inf_generator(train_loader)
 
-# Optimizer
-optimizer = optim.SGD(model.parameters(), lr=args.lr)
+    # Optimizer
+    optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
-# Training iteration
-nepochs = args.nepochs
-#batches_per_epoch = len(train_loader) # usually just put to size of training set
-batches_per_epoch = 1000
+    # Training iteration
+    nepochs = args.nepochs
+    #batches_per_epoch = len(train_loader) # usually just put to size of training set
+    batches_per_epoch = 1000
 
-for itr in range(nepochs * batches_per_epoch):
-    optimizer.zero_grad()
-    x, y = data_gen.__next__()
-    # Have to clone and detach perhaps?
-    if args.adv_train == True:
-        pgd, pgd_l = pgd_attack(model, x, y)
-        x = torch.cat([x.clone().detach().to(device), pgd.to(device)], 0)
-        y = torch.cat([y.to(device), pgd_l.to(device)], 0)
-        x = x.to(device).requires_grad_(True)
-    else:
-        x = x.to(device)
-    y = y.to(device)
-    # Get logits
-    logits = model(x)
-    # Get loss
-    loss = criterion(logits, y)
+    for itr in range(nepochs * batches_per_epoch):
+        optimizer.zero_grad()
+        x, y = data_gen.__next__()
+        # Have to clone and detach perhaps?
+        if args.adv_train == True:
+            pgd, pgd_l = pgd_attack(model, x, y)
+            x = torch.cat([x.clone().detach().to(device), pgd.to(device)], 0)
+            y = torch.cat([y.to(device), pgd_l.to(device)], 0)
+            x = x.to(device).requires_grad_(True)
+        else:
+            x = x.to(device)
+        y = y.to(device)
+        # Get logits
+        logits = model(x)
+        # Get loss
+        loss = criterion(logits, y)
 
-    # Backprop
-    loss.backward()
+        # Backprop
+        loss.backward()
 
-    # Optimizer step
-    optimizer.step()
+        # Optimizer step
+        optimizer.step()
 
-    # Validation?
-    if itr%batches_per_epoch == 0:
-        with torch.no_grad():
-            train_acc = accuracy(model, train_eval_loader)
-            val_acc = accuracy(model, test_loader)
-            print("Epoch {:04d} | Train Acc {:.4f} | Test Acc {:.4f}".format(itr//batches_per_epoch, train_acc, val_acc))
+        # Validation?
+        if itr%batches_per_epoch == 0:
+            with torch.no_grad():
+                train_acc = accuracy(model, train_eval_loader)
+                val_acc = accuracy(model, test_loader)
+                print("Epoch {:04d} | Train Acc {:.4f} | Test Acc {:.4f}".format(itr//batches_per_epoch, train_acc, val_acc))
 
-torch.save({'state_dict':model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
+    #torch.save({'state_dict':model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
+    end = time()
+    total_time = end - start
+    print("Time {}".format(total_time))
+
+if __name__ == '__main__':
+    main()

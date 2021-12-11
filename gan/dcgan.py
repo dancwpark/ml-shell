@@ -11,7 +11,7 @@ from keras.models import Sequential, Model
 from keras.optimizers import Adam
 
 import matplotlib.pyplot as plt
-
+from time import time
 import sys
 
 import numpy as np
@@ -166,10 +166,13 @@ class DCGAN():
                 axs[i,j].imshow(gen_imgs[cnt, :,:,0], cmap='gray')
                 axs[i,j].axis('off')
                 cnt += 1
-        fig.savefig("images/mnist_%d.png" % epoch)
+        #fig.savefig("images/mnist_%d.png" % epoch)
         plt.close()
 
 
 if __name__ == '__main__':
+    time1 = time()
     dcgan = DCGAN()
-    dcgan.train(epochs=4000, batch_size=16, save_interval=50)
+    dcgan.train(epochs=100, batch_size=16, save_interval=50)
+    time2 = time() - time1
+    print(time2)
